@@ -10,18 +10,21 @@ import {
 
 import { protect, adminOrSuperAdmin } from "../middleware/authMiddleware.js";
 
+// ✅ uses your existing multer memory upload
+import { upload } from "../helper/fileUploadMiddleware.js";
+
 const router = express.Router();
 
+// Public
 router.get("/", getProducts);
-// Individual product view
 router.get("/:id", getProductById);
 
-router.post("/", protect, adminOrSuperAdmin, createProduct);
-router.put("/:id", protect, adminOrSuperAdmin, updateProduct);
+// Admin protected + image upload
+router.post("/", upload.single("image"), createProduct);
+router.put("/:id", protect, adminOrSuperAdmin, upload.single("image"), updateProduct);
 
 // Soft delete / activate (recommended)
 router.patch("/:id/toggle", protect, adminOrSuperAdmin, toggleProductActive);
-
 // Hard delete (optional – use carefully)
 router.delete("/:id", protect, adminOrSuperAdmin, deleteProduct);
 

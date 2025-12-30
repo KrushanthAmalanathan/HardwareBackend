@@ -1,5 +1,6 @@
 // controllers/productController.js
 import { Product } from "../models/productModel.js";
+import { productImageUpload } from "../helper/productCloudinarySetUp.js";
 
 /**
  * GET /api/products
@@ -95,8 +96,12 @@ export const getProductById = async (req, res) => {
  * POST /api/products
  * Create
  */
+// @desc    Create a product (supports image upload)
+// @route   POST /api/products
+// @access  Private/Admin
 export const createProduct = async (req, res) => {
   try {
+    // When using multipart/form-data, all fields arrive as strings
     const {
       name,
       category,
@@ -107,113 +112,102 @@ export const createProduct = async (req, res) => {
       oldPrice,
       rating,
       badge,
-      image,
       description,
       stock,
       isActive,
+      image, // optional URL (fallback)
     } = req.body;
 
-    // Basic validation
-    if (!name || !category || !type) {
-      return res.status(400).json({ message: "name, category, type are required" });
-    }
-    if (price === undefined || price === null || Number.isNaN(Number(price))) {
-      return res.status(400).json({ message: "price is required and must be a number" });
-    }
-
-    // Optional uniqueness check for sku (since it's sparse + unique)
-    if (sku) {
-      const exists = await Product.findOne({ sku });
-      if (exists) return res.status(409).json({ message: "SKU already exists" });
+    // ✅ Upload file to Cloudinary if provided
+    let imageUrl = image || "";
+    if (req.file?.buffer) {
+      const uploaded = await productImageUpload(req.file.buffer);
+      imageUrl = uploaded?.secure_url || imageUrl;
     }
 
-    const doc = await Product.create({
-      name: String(name).trim(),
-      category: String(category).trim(),
-      type: String(type).trim(),
-      brand: brand ? String(brand).trim() : undefined,
-      sku: sku ? String(sku).trim() : undefined,
-
-      price: Number(price),
-      oldPrice: oldPrice !== undefined && oldPrice !== null ? Number(oldPrice) : undefined,
-      rating: rating !== undefined && rating !== null ? Number(rating) : undefined,
-      badge,
-      image,
-
-      description,
-      stock: stock !== undefined && stock !== null ? Number(stock) : 0,
-      isActive: isActive !== undefined ? Boolean(isActive) : true,
+    const product = await Product.create({
+      name: (name || "").trim(),
+      category: (category || "").trim(),
+      type: (type || "").trim(),
+      brand: brand ? brand.trim() : undefined,
+      sku: sku ? sku.trim() : undefined,
+      price: price !== undefined ? Number(price) : 0,
+      oldPrice: oldPrice !== undefined && oldPrice !== "" ? Number(oldPrice) : undefined,
+      rating: rating !== undefined && rating !== "" ? Number(rating) : 0,
+      badge: badge ? badge.trim() : undefined,
+      image: imageUrl,
+      description: description ? description.trim() : "",
+      stock: stock !== undefined && stock !== "" ? Number(stock) : 0,
+      isActive: isActive === "false" ? false : Boolean(isActive ?? true),
     });
 
-    res.status(201).json(doc);
-  } catch (e) {
-    // Handle Mongo duplicate key error
-    if (e?.code === 11000) {
-      return res.status(409).json({ message: "Duplicate key (likely sku)" });
-    }
-    res.status(500).json({ message: "Error creating product" });
+    res.status(201).json(product);
+  } catch (error) {
+    res.status(400).json({
+      message: error.message || "Invalid product data",
+    });
   }
 };
 
-/**
- * PUT /api/products/:id
- * Full update (replace fields provided, keep others)
- */
+// @desc    Update a product (supports image upload)
+// @route   PUT /api/products/:id
+// @access  Private/Admin
 export const updateProduct = async (req, res) => {
   try {
-    const { id } = req.params;
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ message: "Product not found" });
 
-    if (!id || !/^[0-9a-fA-F]{24}$/.test(id)) {
-      return res.status(400).json({ message: "Invalid product id" });
+    const {
+      name,
+      category,
+      type,
+      brand,
+      sku,
+      price,
+      oldPrice,
+      rating,
+      badge,
+      description,
+      stock,
+      isActive,
+      image, // optional URL (fallback)
+    } = req.body;
+
+    // ✅ Upload new image if provided
+    let imageUrl = product.image;
+    if (image && image.trim()) imageUrl = image.trim();
+    if (req.file?.buffer) {
+      const uploaded = await productImageUpload(req.file.buffer);
+      imageUrl = uploaded?.secure_url || imageUrl;
     }
 
-    const payload = {};
-    const setIfDefined = (key, val) => {
-      if (val !== undefined) payload[key] = val;
-    };
+    product.name = name !== undefined ? name.trim() : product.name;
+    product.category = category !== undefined ? category.trim() : product.category;
+    product.type = type !== undefined ? type.trim() : product.type;
+    product.brand = brand !== undefined ? (brand ? brand.trim() : "") : product.brand;
+    product.sku = sku !== undefined ? (sku ? sku.trim() : "") : product.sku;
 
-    // Strings
-    if (req.body.name !== undefined) setIfDefined("name", String(req.body.name).trim());
-    if (req.body.category !== undefined) setIfDefined("category", String(req.body.category).trim());
-    if (req.body.type !== undefined) setIfDefined("type", String(req.body.type).trim());
-    if (req.body.brand !== undefined)
-      setIfDefined("brand", req.body.brand ? String(req.body.brand).trim() : "");
-    if (req.body.sku !== undefined)
-      setIfDefined("sku", req.body.sku ? String(req.body.sku).trim() : undefined);
+    if (price !== undefined && price !== "") product.price = Number(price);
+    if (oldPrice !== undefined) {
+      product.oldPrice = oldPrice === "" ? undefined : Number(oldPrice);
+    }
+    if (rating !== undefined && rating !== "") product.rating = Number(rating);
+    if (badge !== undefined) product.badge = badge ? badge.trim() : "";
+    if (description !== undefined) product.description = description ? description.trim() : "";
+    if (stock !== undefined && stock !== "") product.stock = Number(stock);
 
-    // Numbers
-    if (req.body.price !== undefined) setIfDefined("price", Number(req.body.price));
-    if (req.body.oldPrice !== undefined)
-      setIfDefined("oldPrice", req.body.oldPrice === null ? undefined : Number(req.body.oldPrice));
-    if (req.body.rating !== undefined)
-      setIfDefined("rating", req.body.rating === null ? 0 : Number(req.body.rating));
-    if (req.body.stock !== undefined)
-      setIfDefined("stock", req.body.stock === null ? 0 : Number(req.body.stock));
-
-    // Others
-    if (req.body.badge !== undefined) setIfDefined("badge", req.body.badge);
-    if (req.body.image !== undefined) setIfDefined("image", req.body.image);
-    if (req.body.description !== undefined) setIfDefined("description", req.body.description);
-    if (req.body.isActive !== undefined) setIfDefined("isActive", Boolean(req.body.isActive));
-
-    // If client tries to set sku, check uniqueness (optional but friendly)
-    if (payload.sku) {
-      const clash = await Product.findOne({ sku: payload.sku, _id: { $ne: id } }).lean();
-      if (clash) return res.status(409).json({ message: "SKU already exists" });
+    if (isActive !== undefined) {
+      product.isActive = isActive === "false" ? false : Boolean(isActive);
     }
 
-    const updated = await Product.findByIdAndUpdate(id, payload, {
-      new: true,
-      runValidators: true,
-    });
+    product.image = imageUrl;
 
-    if (!updated) return res.status(404).json({ message: "Product not found" });
+    const updated = await product.save();
     res.json(updated);
-  } catch (e) {
-    if (e?.code === 11000) {
-      return res.status(409).json({ message: "Duplicate key (likely sku)" });
-    }
-    res.status(500).json({ message: "Error updating product" });
+  } catch (error) {
+    res.status(400).json({
+      message: error.message || "Failed to update product",
+    });
   }
 };
 
