@@ -8,7 +8,7 @@ import {
 import { protect } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
-
+//checout
 router.use(protect);
 router.get("/", getWishlist);
 router.post("/", addToWishlist);
